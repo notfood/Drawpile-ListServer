@@ -8,7 +8,7 @@ import (
 type Database interface {
 	SessionTimeoutMinutes() int
 	QuerySessionList(opts QueryOptions, ctx context.Context) ([]SessionInfo, error)
-	IsActiveSession(host, id string, port int, ctx context.Context) (bool, error)
+	IsActiveSession(realm string, host string, id string, port int, ctx context.Context) (bool, error)
 	GetHostSessionCount(host string, ctx context.Context) (int, error)
 	IsBannedHost(host string, ctx context.Context) (bool, error)
 	InsertSession(session SessionInfo, clientIp string, ctx context.Context) (NewSessionInfo, error)

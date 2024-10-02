@@ -77,6 +77,7 @@ func sqliteMigrationExists(conn *sqlite.Conn, migration int64) bool {
 func sqliteCreateSessionsTable(conn *sqlite.Conn) {
 	sqliteExec(conn, `CREATE TABLE sessions (
 		id INTEGER PRIMARY KEY NOT NULL,
+		realm TEXT NOT NULL,
 		host TEXT NOT NULL,
 		port INTEGER NOT NULL,
 		session_id TEXT NOT NULL,
@@ -271,10 +272,10 @@ func (db *sqliteDb) SessionTimeoutMinutes() int {
 // Get a list of sessions that match the given query parameters
 func (db *sqliteDb) QuerySessionList(opts QueryOptions, ctx context.Context) ([]SessionInfo, error) {
 	querySql := `
-	SELECT host, port, session_id, protocol, title, users, usernames, password, nsfm, owner,
+	SELECT realm, host, port, session_id, protocol, title, users, usernames, password, nsfm, owner,
 	started, max_users, closed, active_drawing_users, allow_web
 	FROM sessions
-	WHERE last_active >= DATETIME('now', $timeout) AND unlisted=false`
+	WHERE realm=$realm AND last_active >= DATETIME('now', $timeout) AND unlisted=false`
 
 	if len(opts.Title) > 0 {
 		querySql += " AND title LIKE '%' || $title || '%'"
@@ -305,6 +306,7 @@ func (db *sqliteDb) QuerySessionList(opts QueryOptions, ctx context.Context) ([]
 
 	stmt := conn.Prep(querySql)
 
+	stmt.SetText("$realm", opts.Realm)
 	stmt.SetText("$timeout", db.timeoutString)
 
 	if len(opts.Title) > 0 {
@@ -326,6 +328,7 @@ func (db *sqliteDb) QuerySessionList(opts QueryOptions, ctx context.Context) ([]
 		}
 
 		sessions = append(sessions, SessionInfo{
+			Realm:              stmt.GetText("realm"),
 			Host:               stmt.GetText("host"),
 			Port:               int(stmt.GetInt64("port")),
 			Id:                 stmt.GetText("session_id"),
@@ -348,7 +351,7 @@ func (db *sqliteDb) QuerySessionList(opts QueryOptions, ctx context.Context) ([]
 }
 
 // Is there an active announcement for this session
-func (db *sqliteDb) IsActiveSession(host, id string, port int, ctx context.Context) (bool, error) {
+func (db *sqliteDb) IsActiveSession(realm string, host string, id string, port int, ctx context.Context) (bool, error) {
 	conn := db.pool.Get(ctx)
 	if conn == nil {
 		return false, fmt.Errorf("Connection not available")
@@ -357,11 +360,12 @@ func (db *sqliteDb) IsActiveSession(host, id string, port int, ctx context.Conte
 
 	stmt := conn.Prep(`SELECT EXISTS(SELECT 1
 	FROM sessions
-	WHERE host=$host AND port=$port AND session_id=$id
+	WHERE realm=$realm AND host=$host AND port=$port AND session_id=$id
 	AND last_active >= DATETIME('now', $timeout) AND unlisted=0
 	)`)
 	defer stmt.Reset()
 
+	stmt.SetText("$realm", realm)
 	stmt.SetText("$host", host)
 	stmt.SetText("$id", id)
 	stmt.SetInt64("$port", int64(port))
@@ -446,14 +450,15 @@ func (db *sqliteDb) InsertSession(session SessionInfo, clientIp string, ctx cont
 	defer db.pool.Put(conn)
 
 	stmt := conn.Prep(`INSERT INTO sessions
-	(host, port, session_id, protocol, title, users, usernames, password, nsfm,
+	(realm, host, port, session_id, protocol, title, users, usernames, password, nsfm,
 	owner, started, last_active, unlisted, update_key, client_ip, max_users,
 	closed, active_drawing_users, allow_web)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
 	CURRENT_TIMESTAMP, 0, ?, ?, ?, ?, ?, ?)
 	`)
 
 	i := sqlite.BindIncrementor()
+	stmt.BindText(i(), session.Realm)
 	stmt.BindText(i(), session.Host)
 	stmt.BindInt64(i(), int64(session.Port))
 	stmt.BindText(i(), session.Id)
@@ -656,7 +661,7 @@ func (db *sqliteDb) AdminQuerySessions(ctx context.Context) ([]AdminSession, err
 	defer db.pool.Put(conn)
 
 	stmt := conn.Prep(`
-		SELECT id, host, port, session_id, protocol, title, users, usernames,
+		SELECT id, realm, host, port, session_id, protocol, title, users, usernames,
 			password, nsfm, owner, started, last_active, unlisted, update_key,
 			client_ip, unlist_reason, max_users, closed,
 			last_active < DATETIME('now', $timeout) AS timed_out,
@@ -690,6 +695,7 @@ func (db *sqliteDb) AdminQuerySessions(ctx context.Context) ([]AdminSession, err
 
 		sessions = append(sessions, AdminSession{
 			Id:                 stmt.GetInt64("id"),
+			Realm:              stmt.GetText("realm"),
 			Host:               stmt.GetText("host"),
 			Port:               int(stmt.GetInt64("port")),
 			SessionId:          stmt.GetText("session_id"),

@@ -21,12 +21,16 @@ import (
 
 var nameRe = regexp.MustCompile(`\A[a-z0-9_]+\z`)
 
-func serverInfo(ctx apiContext) map[string]interface{} {
+func serverInfo(realm string, ctx apiContext) map[string]interface{} {
 	readonly := len(ctx.cfg.Database) == 0
+	serverName := ctx.cfg.Name
+	if len(realm) > 0 {
+		serverName = realm + "." + serverName
+	}
 	return map[string]interface{}{
 		"api_name":    apiName,
 		"version":     apiVersion,
-		"name":        ctx.cfg.Name,
+		"name":        serverName,
 		"description": ctx.cfg.Description,
 		"favicon":     ctx.cfg.Favicon,
 		"source":      "https://github.com/drawpile/listserver/",
@@ -39,7 +43,8 @@ func serverInfo(ctx apiContext) map[string]interface{} {
 // Return info about this list server
 func apiRootHandler(r *http.Request) http.Handler {
 	ctx := r.Context().Value(apiCtxKey).(apiContext)
-	return JsonResponseOk(serverInfo(ctx))
+	realm := r.Header.Get("X-Realm")
+	return JsonResponseOk(serverInfo(realm, ctx))
 }
 
 // Return the session list
@@ -54,6 +59,7 @@ func apiSessionListHandler(r *http.Request) http.Handler {
 	}
 
 	opts := db.QueryOptions{
+		Realm:    r.Header.Get("X-Realm"),
 		Title:    r.Form.Get("title"),
 		Nsfm:     r.Form.Get("nsfm") == "true",
 		Protocol: r.Form.Get("protocol"),
@@ -131,6 +137,8 @@ func apiAnnounceSessionHandler(r *http.Request) http.Handler {
 		info.Port = 27750
 	}
 
+	info.Realm = r.Header.Get("X-Realm")
+
 	info.Nsfm = info.Nsfm || ctx.cfg.ContainsNsfmWords(info.Title)
 
 	// Don't allow listing sessions on servers that are included anyway
@@ -146,7 +154,7 @@ func apiAnnounceSessionHandler(r *http.Request) http.Handler {
 	}
 
 	// Make sure this hasn't been announced yet
-	if isActive, err := ctx.db.IsActiveSession(info.Host, info.Id, info.Port, r.Context()); err != nil {
+	if isActive, err := ctx.db.IsActiveSession(info.Realm, info.Host, info.Id, info.Port, r.Context()); err != nil {
 		log.Println("IsActive check error:", err)
 		return ErrorResponse("An internal error occurred", http.StatusInternalServerError)
 
@@ -370,7 +378,7 @@ func apiAdminRootHandler(r *http.Request) http.Handler {
 	apiCtx := r.Context().Value(apiCtxKey).(apiContext)
 	adminCtx := r.Context().Value(adminCtxKey).(adminContext)
 	return JsonResponseOk(map[string]interface{}{
-		"server": serverInfo(apiCtx),
+		"server": serverInfo("", apiCtx),
 		"config": map[string]interface{}{
 			"checkserver":             apiCtx.cfg.CheckServer,
 			"maxsessionsperhost":      apiCtx.cfg.MaxSessionsPerHost,

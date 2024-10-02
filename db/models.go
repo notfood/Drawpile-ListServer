@@ -10,6 +10,7 @@ import (
 // It is also used to insert new entries.
 // When inserting, the "Started" field is ignored and the current timestamp is used
 type SessionInfo struct {
+	Realm              string   `json:"realm"`
 	Host               string   `json:"host"`
 	Port               int      `json:"port"`
 	Id                 string   `json:"id"`
@@ -57,6 +58,7 @@ type NewSessionInfo struct {
 
 // Session list querying options
 type QueryOptions struct {
+	Realm    string // filter by realm
 	Title    string // filter by title
 	Nsfm     bool   // show NSFM sessions
 	Protocol string // filter by protocol version (comma separated list accepted)
@@ -64,6 +66,7 @@ type QueryOptions struct {
 
 type AdminSession struct {
 	Id                 int64    `json:"id"`
+	Realm              string   `json:"realm"`
 	Host               string   `json:"host"`
 	Port               int      `json:"port"`
 	SessionId          string   `json:"sessionid"`
